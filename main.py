@@ -6,32 +6,67 @@ import yfinance as yf
 from datetime import datetime, timedelta, timezone
 
 def get_earnings_tickers_yahoo(start_date, end_date):
-    """主引擎：Yahoo Finance 網頁表格爬取 (免費、免 Key)"""
+    """主引擎修復版：加入 Cookie 預熱與完整現代瀏覽器偽裝"""
     print(f"📥 [主引擎] 正在從 Yahoo Finance 抓取 {start_date} 至 {end_date} 的財報日曆...")
     tickers = set()
+    
+    # 建立 Session 來保存 Cookies，這是突破防火牆的關鍵
+    session = requests.Session()
+    
+    # 準備最完整的現代 Chrome 瀏覽器 Headers
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none',
+        'Sec-Fetch-User': '?1',
     }
     
-    dates_to_fetch = [start_date, end_date]
+    session.headers.update(headers)
     
-    for date_str in dates_to_fetch:
-        url = f"https://finance.yahoo.com/calendar/earnings?day={date_str}"
-        try:
-            res = requests.get(url, headers=headers, timeout=15)
-            dfs = pd.read_html(res.text)
-            if dfs:
-                df = dfs[0]
-                if 'Symbol' in df.columns:
-                    symbols = df[~df['Symbol'].str.contains(r'\.', na=False)]['Symbol'].unique().tolist()
-                    tickers.update(symbols)
-        except Exception as e:
-            print(f"⚠️ Yahoo {date_str} 日曆抓取失敗: {e}")
-        time.sleep(2)
+    try:
+        # 【關鍵修復】步驟 1：先訪問首頁，獲取 Yahoo 的追蹤與驗證 Cookies
+        print("🍪 正在進行 Yahoo 伺服器 Cookie 預熱...")
+        session.get("https://finance.yahoo.com/", timeout=15)
+        time.sleep(1.5) # 稍作停頓，模仿人類行為
+        
+        dates_to_fetch = [start_date, end_date]
+        
+        for date_str in dates_to_fetch:
+            url = f"https://finance.yahoo.com/calendar/earnings?day={date_str}"
+            try:
+                # 步驟 2：帶著合法 Cookies 請求財報日曆
+                res = session.get(url, timeout=15)
+                
+                # 檢查是否依然被 Apache 擋住
+                if "ApacheTrafficServer" in res.text or res.status_code != 200:
+                    print(f"⚠️ Yahoo 伺服器仍阻擋連線 (Status: {res.status_code})")
+                    continue
+                    
+                dfs = pd.read_html(res.text)
+                if dfs:
+                    df = dfs[0]
+                    if 'Symbol' in df.columns:
+                        symbols = df[~df['Symbol'].str.contains(r'\.', na=False)]['Symbol'].unique().tolist()
+                        tickers.update(symbols)
+                        
+            except Exception as e:
+                print(f"⚠️ Yahoo {date_str} 日曆抓取失敗: {e}")
+            
+            time.sleep(2.5) # 增加請求間隔，降低被封鎖機率
+            
+    except Exception as e:
+        print(f"⚠️ Yahoo 主引擎初始化失敗: {e}")
         
     if tickers:
         print(f"✅ [主引擎] 成功從 Yahoo 獲取 {len(tickers)} 檔財報代號。")
         return list(tickers)
+        
     return None
 
 def get_earnings_tickers_finnhub(api_key, start_date, end_date):
