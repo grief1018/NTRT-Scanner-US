@@ -5,67 +5,79 @@ import pandas as pd
 import yfinance as yf
 from datetime import datetime, timedelta, timezone
 
-def get_earnings_tickers_fmp(api_key, start_date, end_date):
-    """主引擎：透過 FMP API 獲取財報代號"""
-    url = f"https://financialmodelingprep.com/api/v3/earning_calendar?from={start_date}&to={end_date}&apikey={api_key}"
-    print(f"📥 [主引擎] 正在向 FMP 請求 {start_date} 至 {end_date} 的美股財報日曆...")
+def get_earnings_tickers_yahoo(start_date, end_date):
+    """主引擎：Yahoo Finance 網頁表格爬取 (免費、免 Key)"""
+    print(f"📥 [主引擎] 正在從 Yahoo Finance 抓取 {start_date} 至 {end_date} 的財報日曆...")
+    tickers = set()
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+    }
     
-    res = requests.get(url, timeout=15)
-    if res.status_code == 403:
-        print("⚠️ FMP 回傳 403 Forbidden。可能是 API Key 無效、未驗證 Email，或免費額度受限。")
-        return None
-    elif res.status_code != 200:
-        print(f"⚠️ FMP API 回應異常: {res.status_code}")
-        return None
+    dates_to_fetch = [start_date, end_date]
+    
+    for date_str in dates_to_fetch:
+        url = f"https://finance.yahoo.com/calendar/earnings?day={date_str}"
+        try:
+            res = requests.get(url, headers=headers, timeout=15)
+            dfs = pd.read_html(res.text)
+            if dfs:
+                df = dfs[0]
+                if 'Symbol' in df.columns:
+                    symbols = df[~df['Symbol'].str.contains(r'\.', na=False)]['Symbol'].unique().tolist()
+                    tickers.update(symbols)
+        except Exception as e:
+            print(f"⚠️ Yahoo {date_str} 日曆抓取失敗: {e}")
+        time.sleep(2)
         
-    df = pd.DataFrame(res.json())
-    if df.empty:
+    if tickers:
+        print(f"✅ [主引擎] 成功從 Yahoo 獲取 {len(tickers)} 檔財報代號。")
+        return list(tickers)
+    return None
+
+def get_earnings_tickers_finnhub(api_key, start_date, end_date):
+    """備援引擎：Finnhub JSON API (穩定、需免費 Key)"""
+    print(f"🥷 [備援引擎] 啟動 Finnhub API 抓取財報日曆...")
+    if not api_key:
+        print("⚠️ 未設定 FINNHUB_API_KEY，跳過備援引擎。")
         return []
         
-    df = df[~df['symbol'].str.contains(r'\.')]
-    return df['symbol'].unique().tolist()
-
-def get_earnings_tickers_yahoo(start_date, end_date):
-    """備援引擎：透過 Yahoo Finance 獲取財報代號"""
-    print(f"🥷 [備援引擎] 啟動 Yahoo Finance 財報日曆抓取...")
+    url = f"https://finnhub.io/api/v1/calendar/earnings?from={start_date}&to={end_date}&token={api_key}"
     try:
-        # yfinance 雖然沒有直接的區間日曆，但可以透過 research 或第三方開源解析
-        # 這裡我們使用一個免 API Key 的備用公開端點 (Yahoo/Finnhub 結構)
-        # 為了穩定性，我們直接抓取今天市場上的熱門財報清單
-        # 注意：此處作為 403 的應急備案
-        url = "https://finance.yahoo.com/calendar/earnings"
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
-        res = requests.get(url, headers=headers, timeout=15)
-        dfs = pd.read_html(res.text)
-        
-        if dfs:
-            df = dfs[0]
-            if 'Symbol' in df.columns:
-                tickers = df['Symbol'].unique().tolist()
-                print(f"✅ [備援引擎] 成功獲取 {len(tickers)} 檔財報代號。")
-                return tickers
+        res = requests.get(url, timeout=15)
+        if res.status_code == 200:
+            data = res.json()
+            if 'earningsCalendar' in data:
+                df = pd.DataFrame(data['earningsCalendar'])
+                if not df.empty and 'symbol' in df.columns:
+                    # 排除非美股
+                    symbols = df[~df['symbol'].str.contains(r'\.', na=False)]['symbol'].unique().tolist()
+                    print(f"✅ [備援引擎] 成功從 Finnhub 獲取 {len(symbols)} 檔財報代號。")
+                    return symbols
+        else:
+            print(f"❌ Finnhub API 回應異常: {res.status_code}")
     except Exception as e:
-        print(f"❌ Yahoo 備援抓取失敗: {e}")
+        print(f"❌ Finnhub 抓取失敗: {e}")
+        
     return []
 
-def get_earnings_tickers(api_key):
-    """整合雙引擎獲取名單"""
-    # 修正 DeprecationWarning，改用 timezone.utc
+def get_earnings_tickers(finnhub_key):
+    """智慧切換：先用 Yahoo，失敗再用 Finnhub"""
     today = datetime.now(timezone.utc) - timedelta(hours=5) 
-    start_date = (today - timedelta(days=2)).strftime('%Y-%m-%d')
+    start_date = (today - timedelta(days=1)).strftime('%Y-%m-%d')
     end_date = today.strftime('%Y-%m-%d')
     
-    # 優先嘗試 FMP
-    tickers = get_earnings_tickers_fmp(api_key, start_date, end_date)
+    # 1. 嘗試主引擎 (Yahoo)
+    tickers = get_earnings_tickers_yahoo(start_date, end_date)
     
-    # 若 FMP 失敗 (回傳 None)，則啟動備援引擎
-    if tickers is None:
-        tickers = get_earnings_tickers_yahoo(start_date, end_date)
+    # 2. 若主引擎全軍覆沒，啟動備援引擎 (Finnhub)
+    if not tickers:
+        print("⚠️ 主引擎無法取得資料，自動切換至備援引擎...")
+        tickers = get_earnings_tickers_finnhub(finnhub_key, start_date, end_date)
         
     return tickers
 
 def filter_us_ep_candidates(tickers, max_cap=10000000000, max_vol=1500000):
-    print(f"🔍 開始執行營收 YoY 與冷落濾網，檢查 {len(tickers)} 檔股票...")
+    print(f"🔍 開始執行營收 YoY 與冷落濾網，預計檢查 {len(tickers)} 檔股票...")
     ep_list = []
     
     for ticker in tickers:
@@ -92,7 +104,6 @@ def filter_us_ep_candidates(tickers, max_cap=10000000000, max_vol=1500000):
                 'MarketCap(B)': round(market_cap / 1e9, 2),
                 'AvgVol(K)': round(vol / 1000, 1)
             })
-            
         except Exception:
             pass
         time.sleep(0.2) 
@@ -111,15 +122,12 @@ def send_to_discord(content):
     print("✅ 成功發送至 Discord！")
 
 if __name__ == "__main__":
-    fmp_key = os.environ.get('FMP_API_KEY')
-    if not fmp_key:
-        print("❌ 找不到 FMP_API_KEY，請確認 GitHub Secrets 設定。")
-        exit()
-        
+    finnhub_key = os.environ.get('FINNHUB_API_KEY')
     today_str = (datetime.now(timezone.utc) - timedelta(hours=5)).strftime('%Y-%m-%d')
     print(f"🚀 啟動美股 NTRT 盤前掃描 ({today_str})")
     
-    tickers = get_earnings_tickers(fmp_key)
+    # 雙引擎獲取名單
+    tickers = get_earnings_tickers(finnhub_key)
     
     if tickers:
         df_ep = filter_us_ep_candidates(tickers)
@@ -154,4 +162,4 @@ if __name__ == "__main__":
         else:
             send_to_discord(f"📊 **美股 NTRT 盤前雷達 ({today_str})**\n昨晚至今日盤前發布財報的公司中，無符合「YoY>39% + 市值<10B + 均量<1.5M」的量化標的。")
     else:
-        print("今日查無財報發布數據。")
+        print("今日查無財報發布數據 (雙引擎皆未回傳資料)。")
