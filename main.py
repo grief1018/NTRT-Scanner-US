@@ -98,22 +98,34 @@ def get_earnings_tickers_finnhub(api_key, start_date, end_date):
     return []
 
 def get_earnings_tickers(finnhub_key):
-    """智慧切換：先用 Yahoo，失敗再用 Finnhub"""
+    """終極聯集引擎：Finnhub 與 Yahoo 雙管齊下，確保不漏接任何微型飆股"""
     # 以 UTC-5 (美東時間) 為基準
     today = datetime.now(timezone.utc) - timedelta(hours=5) 
     start_date = (today - timedelta(days=1)).strftime('%Y-%m-%d')
     end_date = today.strftime('%Y-%m-%d')
     
-    # 1. 嘗試主引擎 (Yahoo)
-    tickers = get_earnings_tickers_yahoo(start_date, end_date)
+    all_tickers = set() # 使用 set 來自動去除重複的代號
     
-    # 2. 若主引擎全軍覆沒，啟動備援引擎 (Finnhub)
-    if not tickers:
-        print("⚠️ 主引擎無法取得資料，自動切換至備援引擎...")
-        tickers = get_earnings_tickers_finnhub(finnhub_key, start_date, end_date)
+    # 引擎 A：Finnhub API (資料最完整，包含大量微型股)
+    print("===================================")
+    if finnhub_key:
+        f_tickers = get_earnings_tickers_finnhub(finnhub_key, start_date, end_date)
+        if f_tickers:
+            all_tickers.update(f_tickers)
+    else:
+        print("⚠️ 未提供 Finnhub Key，跳過 API 抓取。")
         
-    return tickers
-
+    # 引擎 B：Yahoo 網頁爬蟲 (輔助抓漏與備援)
+    print("-----------------------------------")
+    y_tickers = get_earnings_tickers_yahoo(start_date, end_date)
+    if y_tickers:
+        all_tickers.update(y_tickers)
+    print("===================================")
+        
+    final_list = list(all_tickers)
+    print(f"🎯 [雙引擎整合] 最終共收集到 {len(final_list)} 檔不重複的財報代號！")
+    return final_list
+    
 def filter_us_ep_candidates(tickers, max_cap=10000000000, max_vol=1500000):
     """執行 yfinance 核心濾網：YoY > 39%、市值 < 10B、均量 < 1.5M"""
     print(f"🔍 開始執行營收 YoY 與冷落濾網，預計檢查 {len(tickers)} 檔股票...")
