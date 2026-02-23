@@ -3,40 +3,69 @@ import time
 import requests
 import pandas as pd
 import yfinance as yf
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+
+def get_earnings_tickers_fmp(api_key, start_date, end_date):
+    """主引擎：透過 FMP API 獲取財報代號"""
+    url = f"https://financialmodelingprep.com/api/v3/earning_calendar?from={start_date}&to={end_date}&apikey={api_key}"
+    print(f"📥 [主引擎] 正在向 FMP 請求 {start_date} 至 {end_date} 的美股財報日曆...")
+    
+    res = requests.get(url, timeout=15)
+    if res.status_code == 403:
+        print("⚠️ FMP 回傳 403 Forbidden。可能是 API Key 無效、未驗證 Email，或免費額度受限。")
+        return None
+    elif res.status_code != 200:
+        print(f"⚠️ FMP API 回應異常: {res.status_code}")
+        return None
+        
+    df = pd.DataFrame(res.json())
+    if df.empty:
+        return []
+        
+    df = df[~df['symbol'].str.contains(r'\.')]
+    return df['symbol'].unique().tolist()
+
+def get_earnings_tickers_yahoo(start_date, end_date):
+    """備援引擎：透過 Yahoo Finance 獲取財報代號"""
+    print(f"🥷 [備援引擎] 啟動 Yahoo Finance 財報日曆抓取...")
+    try:
+        # yfinance 雖然沒有直接的區間日曆，但可以透過 research 或第三方開源解析
+        # 這裡我們使用一個免 API Key 的備用公開端點 (Yahoo/Finnhub 結構)
+        # 為了穩定性，我們直接抓取今天市場上的熱門財報清單
+        # 注意：此處作為 403 的應急備案
+        url = "https://finance.yahoo.com/calendar/earnings"
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+        res = requests.get(url, headers=headers, timeout=15)
+        dfs = pd.read_html(res.text)
+        
+        if dfs:
+            df = dfs[0]
+            if 'Symbol' in df.columns:
+                tickers = df['Symbol'].unique().tolist()
+                print(f"✅ [備援引擎] 成功獲取 {len(tickers)} 檔財報代號。")
+                return tickers
+    except Exception as e:
+        print(f"❌ Yahoo 備援抓取失敗: {e}")
+    return []
 
 def get_earnings_tickers(api_key):
-    """透過 FMP API 獲取近兩日發布財報的美股代號"""
-    # 轉換為美東時間基準 (UTC-5)
-    today = datetime.utcnow() - timedelta(hours=5) 
+    """整合雙引擎獲取名單"""
+    # 修正 DeprecationWarning，改用 timezone.utc
+    today = datetime.now(timezone.utc) - timedelta(hours=5) 
     start_date = (today - timedelta(days=2)).strftime('%Y-%m-%d')
     end_date = today.strftime('%Y-%m-%d')
     
-    url = f"https://financialmodelingprep.com/api/v3/earning_calendar?from={start_date}&to={end_date}&apikey={api_key}"
+    # 優先嘗試 FMP
+    tickers = get_earnings_tickers_fmp(api_key, start_date, end_date)
     
-    try:
-        print(f"📥 正在向 FMP 請求 {start_date} 至 {end_date} 的美股財報日曆...")
-        res = requests.get(url, timeout=15)
-        if res.status_code != 200:
-            print(f"⚠️ FMP API 回應異常: {res.status_code}")
-            return []
-            
-        df = pd.DataFrame(res.json())
-        if df.empty:
-            return []
-            
-        # 排除非美股 (排除含有 . 的代號如 TSX 等)
-        df = df[~df['symbol'].str.contains(r'\.')]
-        tickers = df['symbol'].unique().tolist()
-        print(f"✅ 成功獲取 {len(tickers)} 檔發布財報的美股代號。")
-        return tickers
-    except Exception as e:
-        print(f"❌ 獲取財報日曆失敗: {e}")
-        return []
+    # 若 FMP 失敗 (回傳 None)，則啟動備援引擎
+    if tickers is None:
+        tickers = get_earnings_tickers_yahoo(start_date, end_date)
+        
+    return tickers
 
 def filter_us_ep_candidates(tickers, max_cap=10000000000, max_vol=1500000):
-    """執行 yfinance 核心濾網：YoY > 39%、市值 < 10B、均量 < 1.5M"""
-    print(f"🔍 開始執行營收 YoY 與冷落濾網，預計耗時數分鐘...")
+    print(f"🔍 開始執行營收 YoY 與冷落濾網，檢查 {len(tickers)} 檔股票...")
     ep_list = []
     
     for ticker in tickers:
@@ -44,17 +73,14 @@ def filter_us_ep_candidates(tickers, max_cap=10000000000, max_vol=1500000):
             stock = yf.Ticker(ticker)
             info = stock.info
             
-            # 1. 營收成長過濾 (revenueGrowth > 0.39)
             rev_growth = info.get('revenueGrowth')
             if rev_growth is None or rev_growth < 0.39:
                 continue
                 
-            # 2. 市值過濾 (< 10 Billion USD)
             market_cap = info.get('marketCap')
             if market_cap is None or market_cap > max_cap:
                 continue
                 
-            # 3. 籌碼過濾 (< 1.5M Shares)
             vol = info.get('averageVolume')
             if vol is None or vol > max_vol:
                 continue
@@ -69,7 +95,6 @@ def filter_us_ep_candidates(tickers, max_cap=10000000000, max_vol=1500000):
             
         except Exception:
             pass
-        # 避免觸發 yfinance 阻擋，加入微小延遲
         time.sleep(0.2) 
         
     return pd.DataFrame(ep_list)
@@ -91,7 +116,7 @@ if __name__ == "__main__":
         print("❌ 找不到 FMP_API_KEY，請確認 GitHub Secrets 設定。")
         exit()
         
-    today_str = (datetime.utcnow() - timedelta(hours=5)).strftime('%Y-%m-%d')
+    today_str = (datetime.now(timezone.utc) - timedelta(hours=5)).strftime('%Y-%m-%d')
     print(f"🚀 啟動美股 NTRT 盤前掃描 ({today_str})")
     
     tickers = get_earnings_tickers(fmp_key)
@@ -100,7 +125,6 @@ if __name__ == "__main__":
         df_ep = filter_us_ep_candidates(tickers)
         
         if not df_ep.empty:
-            # 依 YoY 排序並取 Top 10，確保提示詞精練
             df_ep = df_ep.sort_values(by='YoY(%)', ascending=False).head(10)
             
             stock_list_str = ""
