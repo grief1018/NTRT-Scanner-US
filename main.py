@@ -210,7 +210,7 @@ if __name__ == "__main__":
             discord_msg += "【EP 完美催化劑標準】\n"
             discord_msg += "1. 成長型 (Growth EP)：接獲新訂單，且「強力上修未來幾季的財測指引 (Guidance Raises)」。\n"
             discord_msg += "2. 轉機型 (Turnaround EP)：處於循環底部，財報顯示「由虧轉盈 (Inflection)」，這類股票適合做更長期的波段。\n"
-            discord_msg += "3. 題材型 (Story EP)：獲得 FDA 批准、美國政府/國防部大單、或切入 AI 核心供應鏈。\n\n"
+            discord_msg += "3. 題材型 (Story EP)：獲得政府重大政策補助、FDA 新藥批准、重量級企業結盟，或搭上全新熱門產業的超級題材。\n\n"
             discord_msg += "【美股專屬交易鐵律 (請在分析結果中標註提醒)】\n"
             discord_msg += "若該股票盤前跳空幅度大於 40% (Gap > 40%)，請標註「禁止 OPG 市價追高，需轉入延遲反應 (Delayed Reaction) 觀察池等待突破」。\n\n"
             discord_msg += "【輸出格式】\n"
