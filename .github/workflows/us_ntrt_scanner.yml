@@ -27,5 +27,5 @@ jobs:
     - name: 執行美股 NTRT 掃描腳本
       env:
         DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-        FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
+        FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
       run: python main.py
