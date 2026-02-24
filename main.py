@@ -202,7 +202,7 @@ if __name__ == "__main__":
             discord_msg += "請複製以下提示詞，交由 AI 進行盤前質化決選：\n\n"
             discord_msg += "```text\n"
             discord_msg += "你是一位精通 StockBee Episodic Pivot (EP) 策略的美股頂尖交易員。\n"
-            discord_msg += "請從以下「剛發布財報、營收暴增且平時被冷落」的美股初篩名單中，挑選出最具爆發潛力的 1~3 檔股票。\n\n"
+            discord_msg += "請從以下「剛發布財報、營收暴增且平時被冷落」的美股初篩名單中，挑選出最具爆發潛力的 1~5 檔股票。\n\n"
             discord_msg += "【初篩名單 (已按 YoY 排序)】\n"
             discord_msg += stock_list_str + "\n"
             discord_msg += "【分析要求】\n"
@@ -214,7 +214,7 @@ if __name__ == "__main__":
             discord_msg += "【美股專屬交易鐵律 (請在分析結果中標註提醒)】\n"
             discord_msg += "若該股票盤前跳空幅度大於 40% (Gap > 40%)，請標註「禁止 OPG 市價追高，需轉入延遲反應 (Delayed Reaction) 觀察池等待突破」。\n\n"
             discord_msg += "【輸出格式】\n"
-            discord_msg += "直接回覆精煉後的 1~3 檔標的。標註 EP 類型，並用 100 字簡述你查到的「Earnings 催化劑亮點」。\n"
+            discord_msg += "直接回覆精煉後的 1~5 檔標的。標註 EP 類型，並用 100 字簡述你查到的「Earnings 催化劑亮點」。\n"
             discord_msg += "```"
             
             send_to_discord(discord_msg)
